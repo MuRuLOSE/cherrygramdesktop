@@ -179,7 +179,7 @@ void ShowCallsBox(not_null<Window::SessionController*> window) {
 		self,
 		Data::PeerUpdate::Flag::EmojiStatus
 	) | rpl::map([=] {
-		return (self->emojiStatusId() != 0);
+		return !!self->emojiStatusId();
 	}) | rpl::distinct_until_changed() | rpl::map([](bool has) {
 		const auto makeLink = [](const QString &text) {
 			return Ui::Text::Link(text);
@@ -391,7 +391,8 @@ MainMenu::MainMenu(
 , _badge(std::make_unique<Info::Profile::Badge>(
 	this,
 	st::settingsInfoPeerBadge,
-	controller->session().user(),
+	&controller->session(),
+	Info::Profile::BadgeContentForPeer(controller->session().user()),
 	_emojiStatusPanel.get(),
 	[=] { return controller->isGifPausedAtLeastFor(GifPauseReason::Layer); },
 	kPlayStatusLimit,
@@ -722,6 +723,23 @@ void MainMenu::setupMenu() {
 			std::move(descriptor));
 	};
 	if (!_controller->session().supportMode()) {
+		_menu->add(
+			CreateButtonWithIcon(
+				_menu,
+				tr::lng_menu_my_profile(),
+				st::mainMenuButton,
+				{ &st::menuIconProfile })
+		)->setClickedCallback([=] {
+			controller->showSection(
+				Info::Stories::Make(controller->session().user()));
+		});
+
+		SetupMenuBots(_menu, controller);
+
+		_menu->add(
+			object_ptr<Ui::PlainShadow>(_menu),
+			{ 0, st::mainMenuSkip, 0, st::mainMenuSkip });
+
 		AddMyChannelsBox(addAction(
 			tr::lng_create_group_title(),
 			{ &st::menuIconGroups }
@@ -740,40 +758,9 @@ void MainMenu::setupMenu() {
 			}
 		});
 
-		const auto wrap = _menu->add(
-			object_ptr<Ui::SlideWrap<Ui::SettingsButton>>(
-				_menu,
-				CreateButtonWithIcon(
-					_menu,
-					tr::lng_menu_my_stories(),
-					st::mainMenuButton,
-					IconDescriptor{ &st::menuIconStoriesSavedSection })));
-		const auto selfId = controller->session().userPeerId();
-		const auto stories = &controller->session().data().stories();
-		if (stories->archiveCount(selfId) > 0) {
-			wrap->toggle(true, anim::type::instant);
-		} else {
-			wrap->toggle(false, anim::type::instant);
-			if (!stories->archiveCountKnown(selfId)) {
-				stories->archiveLoadMore(selfId);
-				wrap->toggleOn(stories->archiveChanged(
-				) | rpl::filter(
-					rpl::mappers::_1 == selfId
-				) | rpl::map([=] {
-					return stories->archiveCount(selfId) > 0;
-				}) | rpl::filter(rpl::mappers::_1) | rpl::take(1));
-			}
-		}
-		wrap->entity()->setClickedCallback([=] {
-			controller->showSection(
-				Info::Stories::Make(controller->session().user()));
-		});
-
-		SetupMenuBots(_menu, controller);
-
 		addAction(
 			tr::lng_menu_contacts(),
-			{ &st::menuIconProfile }
+			{ &st::menuIconUserShow }
 		)->setClickedCallback([=] {
 			controller->show(PrepareContactsBox(controller));
 		});

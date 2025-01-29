@@ -44,6 +44,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h"
 #include "window/window_peer_menu.h"
 #include "main/main_session.h"
+#include "ui/layers/generic_box.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/widgets/scroll_area.h"
 #include "ui/toast/toast.h"
@@ -57,6 +58,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/ui_utility.h"
 #include "lang/lang_keys.h"
 #include "boxes/delete_messages_box.h"
+#include "boxes/moderate_messages_box.h"
 #include "boxes/premium_preview_box.h"
 #include "boxes/peers/edit_participant_box.h"
 #include "core/crash_reports.h"
@@ -711,7 +713,25 @@ std::optional<int> ListWidget::scrollTopForView(
 	const auto top = view->y();
 	const auto height = view->height();
 	const auto available = _visibleBottom - _visibleTop;
-	return top - std::max((available - height) / 2, 0);
+	const auto heightLeft = (available - height);
+	if (heightLeft >= 0) {
+		return std::max(top - (heightLeft / 2), 0);
+	} else if (const auto sel = _highlighter.state(view->data()).range
+		; !sel.empty() && !IsSubGroupSelection(sel)) {
+		const auto single = st::messageTextStyle.font->height;
+		const auto begin = HistoryView::FindViewY(view, sel.from) - single;
+		const auto end = HistoryView::FindViewY(view, sel.to, begin + single)
+			+ 2 * single;
+		auto result = top;
+		if (end > available) {
+			result = std::max(result, top + end - available);
+		}
+		if (top + begin < result) {
+			result = top + begin;
+		}
+		return result;
+	}
+	return top;
 }
 
 void ListWidget::scrollTo(
@@ -873,24 +893,31 @@ bool ListWidget::showAtPositionNow(
 		Data::MessagePosition position,
 		const Window::SectionShow &params,
 		Fn<void(bool found)> done) {
-	if (const auto scrollTop = scrollTopForPosition(position)) {
-		computeScrollTo(*scrollTop, position, params.animated);
-		if (position != Data::MaxMessagePosition
-			&& position != Data::UnreadMessagePosition) {
-			highlightMessage(
-				position.fullId,
-				params.highlightPart,
-				params.highlightPartOffsetHint);
-		}
-		if (done) {
-			const auto found = !position.fullId.peer
-				|| !IsServerMsgId(position.fullId.msg)
-				|| viewForItem(position.fullId);
-			done(found);
-		}
-		return true;
+	auto scrollTop = scrollTopForPosition(position);
+	if (!scrollTop.has_value()) {
+		return false;
 	}
-	return false;
+	if (position != Data::MaxMessagePosition
+		&& position != Data::UnreadMessagePosition) {
+		const auto hasHighlight = !params.highlightPart.empty();
+		highlightMessage(
+			position.fullId,
+			params.highlightPart,
+			params.highlightPartOffsetHint);
+		if (hasHighlight) {
+			// We may want to scroll to a different part of the message.
+			scrollTop = scrollTopForPosition(position);
+			Assert(scrollTop.has_value());
+		}
+	}
+	computeScrollTo(*scrollTop, position, params.animated);
+	if (done) {
+		const auto found = !position.fullId.peer
+			|| !IsServerMsgId(position.fullId.msg)
+			|| viewForItem(position.fullId);
+		done(found);
+	}
+	return true;
 }
 
 void ListWidget::computeScrollTo(
@@ -4252,6 +4279,11 @@ void ListWidget::overrideIsChatWide(bool isWide) {
 ListWidget::~ListWidget() {
 	// Destroy child widgets first, because they may invoke leaveEvent-s.
 	_emptyInfo = nullptr;
+	if (const auto raw = _menu.release()) {
+		crl::on_main(raw, [=] {
+			delete raw;
+		});
+	}
 }
 
 void ConfirmDeleteSelectedItems(not_null<ListWidget*> widget) {
@@ -4259,18 +4291,30 @@ void ConfirmDeleteSelectedItems(not_null<ListWidget*> widget) {
 	if (items.empty()) {
 		return;
 	}
+	const auto controller = widget->controller();
+	const auto owner = &controller->session().data();
+	auto historyItems = std::vector<not_null<HistoryItem*>>();
+	historyItems.reserve(items.size());
 	for (const auto &item : items) {
 		if (!item.canDelete) {
 			return;
+		} else if (const auto i = owner->message(item.msgId)) {
+			historyItems.push_back(i);
 		}
 	}
-	auto box = Box<DeleteMessagesBox>(
-		&widget->session(),
-		widget->getSelectedIds());
-	box->setDeleteConfirmedCallback(crl::guard(widget, [=] {
+	const auto confirmed = crl::guard(widget, [=] {
 		widget->cancelSelection();
-	}));
-	widget->controller()->show(std::move(box));
+	});
+	if (CanCreateModerateMessagesBox(historyItems)) {
+		controller->show(
+			Box(CreateModerateMessagesBox, historyItems, confirmed));
+	} else {
+		auto box = Box<DeleteMessagesBox>(
+			&widget->session(),
+			widget->getSelectedIds());
+		box->setDeleteConfirmedCallback(confirmed);
+		controller->show(std::move(box));
+	}
 }
 
 void ConfirmForwardSelectedItems(not_null<ListWidget*> widget) {

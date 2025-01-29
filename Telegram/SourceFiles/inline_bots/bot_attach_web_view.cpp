@@ -348,7 +348,7 @@ WebViewContext ResolveContext(
 		WebViewContext context) {
 	if (!context.dialogsEntryState.key) {
 		if (const auto strong = context.controller.get()) {
-			context.dialogsEntryState = strong->currentDialogsEntryState();
+			context.dialogsEntryState = strong->dialogsEntryStateCurrent();
 		}
 	}
 	if (!context.action) {
@@ -383,7 +383,7 @@ void FillBotUsepic(
 		bot->owner().customEmojiManager().registerInternalEmoji(
 			st::topicButtonArrow,
 			st::channelEarnLearnArrowMargins,
-			false));
+			true));
 	auto aboutLabel = Ui::CreateLabelWithCustomEmoji(
 		box->verticalLayout(),
 		tr::lng_allow_bot_webview_details(
@@ -479,8 +479,7 @@ bool CheckEmojiStatusPremium(not_null<UserData*> bot) {
 		return true;
 	}
 	const auto window = ChatHelpers::ResolveWindowDefault()(
-		&bot->session(),
-		ChatHelpers::WindowUsage::PremiumPromo);
+		&bot->session());
 	if (window) {
 		ShowPremiumPreviewBox(window, PremiumFeature::EmojiStatus);
 		window->window().activate();
@@ -591,7 +590,7 @@ void ConfirmEmojiStatusBox(
 			return;
 		}
 		document->owner().emojiStatuses().set(
-			document->id,
+			{ document->id },
 			duration ? (base::unixtime::now() + duration) : 0);
 		*set = true;
 		box->closeBox();

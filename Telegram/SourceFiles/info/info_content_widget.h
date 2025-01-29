@@ -57,6 +57,10 @@ enum class Type : uchar;
 struct Tag;
 } // namespace Info::BotStarRef
 
+namespace Info::GlobalMedia {
+struct Tag;
+} // namespace Info::GlobalMedia
+
 namespace Info {
 
 class ContentMemento;
@@ -115,6 +119,7 @@ public:
 	virtual void checkBeforeClose(Fn<void()> close) {
 		close();
 	}
+	virtual void checkBeforeCloseByEscape(Fn<void()> close);
 	[[nodiscard]] virtual rpl::producer<QString> title() = 0;
 	[[nodiscard]] virtual rpl::producer<QString> subtitle() {
 		return nullptr;
@@ -126,7 +131,8 @@ public:
 
 	[[nodiscard]] int scrollBottomSkip() const;
 	[[nodiscard]] rpl::producer<int> scrollBottomSkipValue() const;
-	[[nodiscard]] rpl::producer<bool> desiredBottomShadowVisibility() const;
+	[[nodiscard]] virtual auto desiredBottomShadowVisibility()
+		-> rpl::producer<bool>;
 
 protected:
 	template <typename Widget>
@@ -197,6 +203,7 @@ public:
 	explicit ContentMemento(Stories::Tag stories);
 	explicit ContentMemento(Statistics::Tag statistics);
 	explicit ContentMemento(BotStarRef::Tag starref);
+	explicit ContentMemento(GlobalMedia::Tag global);
 	ContentMemento(not_null<PollData*> poll, FullMsgId contextId)
 	: _poll(poll)
 	, _pollReactionsContextId(contextId) {
@@ -253,6 +260,9 @@ public:
 	FullMsgId reactionsContextId() const {
 		return _reactionsWhoReadIds ? _pollReactionsContextId : FullMsgId();
 	}
+	UserData *globalMediaSelf() const {
+		return _globalMediaSelf;
+	}
 	Key key() const;
 
 	virtual Section section() const = 0;
@@ -298,6 +308,7 @@ private:
 	std::shared_ptr<Api::WhoReadList> _reactionsWhoReadIds;
 	Data::ReactionId _reactionsSelected;
 	const FullMsgId _pollReactionsContextId;
+	UserData * const _globalMediaSelf = nullptr;
 
 	int _scrollTop = 0;
 	QString _searchFieldQuery;
